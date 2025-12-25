@@ -83,6 +83,14 @@ var rootCmd = &cobra.Command{
 			svrCfg = &serverCfg
 		}
 
+		// Set feature gates before validation
+		if len(svrCfg.FeatureGates) > 0 {
+			if err := featuregate.SetFromMap(svrCfg.FeatureGates); err != nil {
+				fmt.Println(err)
+				os.Exit(1)
+			}
+		}
+
 		unsafeFeatures := security.NewUnsafeFeatures(allowUnsafe)
 		validator := validation.NewConfigValidator(unsafeFeatures)
 		warning, err := validator.ValidateServerConfig(svrCfg)
@@ -116,13 +124,6 @@ func runServer(cfg *v1.ServerConfig) (err error) {
 		log.Infof("frps uses config file: %s", cfgFile)
 	} else {
 		log.Infof("frps uses command line arguments for config")
-	}
-
-	// Set feature gates from config
-	if len(cfg.FeatureGates) > 0 {
-		if err := featuregate.SetFromMap(cfg.FeatureGates); err != nil {
-			return err
-		}
 	}
 
 	svr, err := server.NewService(cfg)
