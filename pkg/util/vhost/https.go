@@ -199,7 +199,7 @@ func (w *responseWriter) WriteHeader(statusCode int) {
 			fmt.Fprintf(w.brw, "%s: %s\r\n", key, value)
 		}
 	}
-	w.brw.WriteString("\r\n")
+	_, _ = w.brw.WriteString("\r\n")
 }
 
 func (w *responseWriter) Flush() error {
