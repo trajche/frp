@@ -97,6 +97,10 @@ type ServerConfig struct {
 
 	HTTPPlugins []HTTPPluginOptions `json:"httpPlugins,omitempty"`
 
+	// FeatureGates specifies a set of feature gates to enable or disable.
+	// Each feature gate is defined by a name and a boolean value.
+	FeatureGates map[string]bool `json:"featureGates,omitempty"`
+
 	// ACME configures automatic TLS certificate provisioning via Let's Encrypt.
 	// Requires the ACME feature gate to be enabled: featureGates = { ACME = true }
 	ACME ACMEConfig `json:"acme,omitempty"`

@@ -25,6 +25,7 @@ import (
 	"github.com/fatedier/frp/pkg/config"
 	v1 "github.com/fatedier/frp/pkg/config/v1"
 	"github.com/fatedier/frp/pkg/config/v1/validation"
+	"github.com/fatedier/frp/pkg/policy/featuregate"
 	"github.com/fatedier/frp/pkg/policy/security"
 	"github.com/fatedier/frp/pkg/util/log"
 	"github.com/fatedier/frp/pkg/util/version"
@@ -115,6 +116,13 @@ func runServer(cfg *v1.ServerConfig) (err error) {
 		log.Infof("frps uses config file: %s", cfgFile)
 	} else {
 		log.Infof("frps uses command line arguments for config")
+	}
+
+	// Set feature gates from config
+	if len(cfg.FeatureGates) > 0 {
+		if err := featuregate.SetFromMap(cfg.FeatureGates); err != nil {
+			return err
+		}
 	}
 
 	svr, err := server.NewService(cfg)
