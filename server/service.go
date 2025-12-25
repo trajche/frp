@@ -357,6 +357,11 @@ func NewService(cfg *v1.ServerConfig) (*Service, error) {
 		var httpsOpts []vhost.HTTPSMuxerOption
 		if acmeManager != nil && acmeManager.Config().EnableForVhost {
 			httpsOpts = append(httpsOpts, vhost.WithACMEProvider(acmeManager))
+			// Pass the HTTP reverse proxy to handle TLS-terminated connections for HTTP proxies
+			if svr.rc.HTTPReverseProxy != nil {
+				httpsOpts = append(httpsOpts, vhost.WithHTTPHandler(svr.rc.HTTPReverseProxy))
+				log.Infof("ACME TLS termination enabled for HTTP proxies on HTTPS port")
+			}
 			log.Infof("ACME certificate provider enabled for HTTPS vhost")
 		}
 		svr.rc.VhostHTTPSMuxer, err = vhost.NewHTTPSMuxer(l, vhostReadWriteTimeout, httpsOpts...)

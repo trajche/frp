@@ -15,9 +15,11 @@
 package vhost
 
 import (
+	"bufio"
 	"crypto/tls"
 	"io"
 	"net"
+	"net/http"
 	"time"
 
 	libnet "github.com/fatedier/golib/net"
@@ -39,9 +41,18 @@ func WithACMEProvider(provider ACMEProvider) HTTPSMuxerOption {
 	}
 }
 
+// WithHTTPHandler sets the HTTP handler for TLS-terminated connections.
+// This is used to serve HTTP proxies over HTTPS with ACME certificates.
+func WithHTTPHandler(handler http.Handler) HTTPSMuxerOption {
+	return func(m *HTTPSMuxer) {
+		m.httpHandler = handler
+	}
+}
+
 type HTTPSMuxer struct {
 	*Muxer
 	acmeProvider ACMEProvider
+	httpHandler  http.Handler
 }
 
 func NewHTTPSMuxer(listener net.Listener, timeout time.Duration, opts ...HTTPSMuxerOption) (*HTTPSMuxer, error) {
@@ -62,14 +73,142 @@ func NewHTTPSMuxer(listener net.Listener, timeout time.Duration, opts ...HTTPSMu
 }
 
 // vhostFailedWithACME handles failed vhost connections with optional ACME certificate lookup.
+// If an HTTP handler is configured, it will terminate TLS and forward the request.
 func (m *HTTPSMuxer) vhostFailedWithACME(c net.Conn) {
-	tlsCfg := &tls.Config{}
-	if m.acmeProvider != nil {
-		tlsCfg.GetCertificate = m.acmeProvider.GetCertificate()
+	if m.acmeProvider == nil {
+		c.Close()
+		return
 	}
-	// Try to complete handshake (will fail but provides proper TLS alert)
+
+	tlsCfg := &tls.Config{
+		GetCertificate: m.acmeProvider.GetCertificate(),
+	}
+
+	// If we have an HTTP handler, terminate TLS and serve the request
+	if m.httpHandler != nil {
+		tlsConn := tls.Server(c, tlsCfg)
+		if err := tlsConn.Handshake(); err != nil {
+			tlsConn.Close()
+			return
+		}
+
+		// Serve HTTP request over the TLS connection
+		m.serveHTTP(tlsConn)
+		return
+	}
+
+	// No HTTP handler, just do handshake and close
 	_ = tls.Server(c, tlsCfg).Handshake()
 	c.Close()
+}
+
+// serveHTTP handles an HTTP request over a TLS connection.
+func (m *HTTPSMuxer) serveHTTP(conn net.Conn) {
+	defer conn.Close()
+
+	// Read HTTP requests from the connection
+	reader := bufio.NewReader(conn)
+	for {
+		req, err := http.ReadRequest(reader)
+		if err != nil {
+			return
+		}
+
+		// Create a response writer
+		rw := &responseWriter{
+			conn:   conn,
+			header: make(http.Header),
+		}
+
+		// Set TLS state on request
+		if tlsConn, ok := conn.(*tls.Conn); ok {
+			state := tlsConn.ConnectionState()
+			req.TLS = &state
+		}
+
+		// Mark as HTTPS
+		req.URL.Scheme = "https"
+		if req.URL.Host == "" {
+			req.URL.Host = req.Host
+		}
+
+		// Serve the request
+		m.httpHandler.ServeHTTP(rw, req)
+
+		// Flush the response
+		if err := rw.finalize(); err != nil {
+			return
+		}
+
+		// Check if we should keep the connection alive
+		if req.Close || rw.closeAfterReply {
+			return
+		}
+	}
+}
+
+// responseWriter implements http.ResponseWriter for raw connections.
+type responseWriter struct {
+	conn            net.Conn
+	header          http.Header
+	wroteHeader     bool
+	statusCode      int
+	closeAfterReply bool
+	buf             []byte
+}
+
+func (w *responseWriter) Header() http.Header {
+	return w.header
+}
+
+func (w *responseWriter) Write(data []byte) (int, error) {
+	if !w.wroteHeader {
+		w.WriteHeader(http.StatusOK)
+	}
+	w.buf = append(w.buf, data...)
+	return len(data), nil
+}
+
+func (w *responseWriter) WriteHeader(statusCode int) {
+	if w.wroteHeader {
+		return
+	}
+	w.wroteHeader = true
+	w.statusCode = statusCode
+}
+
+func (w *responseWriter) finalize() error {
+	if !w.wroteHeader {
+		w.WriteHeader(http.StatusOK)
+	}
+
+	// Build response
+	resp := &http.Response{
+		StatusCode:    w.statusCode,
+		ProtoMajor:    1,
+		ProtoMinor:    1,
+		Header:        w.header,
+		ContentLength: int64(len(w.buf)),
+	}
+
+	// Check Connection header
+	if w.header.Get("Connection") == "close" {
+		w.closeAfterReply = true
+	}
+
+	// Write response header
+	if err := resp.Write(w.conn); err != nil {
+		return err
+	}
+
+	// Write body
+	if len(w.buf) > 0 {
+		if _, err := w.conn.Write(w.buf); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 func GetHTTPSHostname(c net.Conn) (_ net.Conn, _ map[string]string, err error) {
