@@ -17,6 +17,7 @@ package vhost
 import (
 	"bufio"
 	"crypto/tls"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -106,17 +107,21 @@ func (m *HTTPSMuxer) vhostFailedWithACME(c net.Conn) {
 func (m *HTTPSMuxer) serveHTTP(conn net.Conn) {
 	defer conn.Close()
 
-	// Read HTTP requests from the connection
+	// Create buffered reader/writer for the connection
 	reader := bufio.NewReader(conn)
+	writer := bufio.NewWriter(conn)
+	brw := bufio.NewReadWriter(reader, writer)
+
 	for {
 		req, err := http.ReadRequest(reader)
 		if err != nil {
 			return
 		}
 
-		// Create a response writer
+		// Create a response writer with hijack support
 		rw := &responseWriter{
 			conn:   conn,
+			brw:    brw,
 			header: make(http.Header),
 		}
 
@@ -135,26 +140,32 @@ func (m *HTTPSMuxer) serveHTTP(conn net.Conn) {
 		// Serve the request
 		m.httpHandler.ServeHTTP(rw, req)
 
+		// If connection was hijacked (e.g., for WebSocket), stop processing
+		if rw.hijacked {
+			return
+		}
+
 		// Flush the response
-		if err := rw.finalize(); err != nil {
+		if err := rw.Flush(); err != nil {
 			return
 		}
 
 		// Check if we should keep the connection alive
-		if req.Close || rw.closeAfterReply {
+		if req.Close || rw.closeAfterReply || rw.header.Get("Connection") == "close" {
 			return
 		}
 	}
 }
 
-// responseWriter implements http.ResponseWriter for raw connections.
+// responseWriter implements http.ResponseWriter and http.Hijacker for raw connections.
 type responseWriter struct {
 	conn            net.Conn
+	brw             *bufio.ReadWriter
 	header          http.Header
 	wroteHeader     bool
 	statusCode      int
 	closeAfterReply bool
-	buf             []byte
+	hijacked        bool
 }
 
 func (w *responseWriter) Header() http.Header {
@@ -162,53 +173,51 @@ func (w *responseWriter) Header() http.Header {
 }
 
 func (w *responseWriter) Write(data []byte) (int, error) {
+	if w.hijacked {
+		return 0, http.ErrHijacked
+	}
 	if !w.wroteHeader {
 		w.WriteHeader(http.StatusOK)
 	}
-	w.buf = append(w.buf, data...)
-	return len(data), nil
+	return w.brw.Write(data)
 }
 
 func (w *responseWriter) WriteHeader(statusCode int) {
-	if w.wroteHeader {
+	if w.wroteHeader || w.hijacked {
 		return
 	}
 	w.wroteHeader = true
 	w.statusCode = statusCode
-}
 
-func (w *responseWriter) finalize() error {
-	if !w.wroteHeader {
-		w.WriteHeader(http.StatusOK)
-	}
+	// Write status line
+	statusText := http.StatusText(statusCode)
+	fmt.Fprintf(w.brw, "HTTP/1.1 %d %s\r\n", statusCode, statusText)
 
-	// Build response
-	resp := &http.Response{
-		StatusCode:    w.statusCode,
-		ProtoMajor:    1,
-		ProtoMinor:    1,
-		Header:        w.header,
-		ContentLength: int64(len(w.buf)),
-	}
-
-	// Check Connection header
-	if w.header.Get("Connection") == "close" {
-		w.closeAfterReply = true
-	}
-
-	// Write response header
-	if err := resp.Write(w.conn); err != nil {
-		return err
-	}
-
-	// Write body
-	if len(w.buf) > 0 {
-		if _, err := w.conn.Write(w.buf); err != nil {
-			return err
+	// Write headers
+	for key, values := range w.header {
+		for _, value := range values {
+			fmt.Fprintf(w.brw, "%s: %s\r\n", key, value)
 		}
 	}
+	w.brw.WriteString("\r\n")
+}
 
-	return nil
+func (w *responseWriter) Flush() error {
+	if w.hijacked {
+		return nil
+	}
+	return w.brw.Flush()
+}
+
+// Hijack implements http.Hijacker for WebSocket support
+func (w *responseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	if w.hijacked {
+		return nil, nil, http.ErrHijacked
+	}
+	w.hijacked = true
+	// Flush any buffered data before hijacking
+	w.brw.Flush()
+	return w.conn, w.brw, nil
 }
 
 func GetHTTPSHostname(c net.Conn) (_ net.Conn, _ map[string]string, err error) {
