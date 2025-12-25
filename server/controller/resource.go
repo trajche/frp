@@ -15,6 +15,7 @@
 package controller
 
 import (
+	"github.com/fatedier/frp/pkg/acme"
 	"github.com/fatedier/frp/pkg/nathole"
 	plugin "github.com/fatedier/frp/pkg/plugin/server"
 	"github.com/fatedier/frp/pkg/util/tcpmux"
@@ -61,6 +62,9 @@ type ResourceController struct {
 
 	// All server manager plugin
 	PluginManager *plugin.Manager
+
+	// ACME certificate manager (optional, nil if ACME is disabled)
+	ACMEManager *acme.Manager
 }
 
 func (rc *ResourceController) Close() error {

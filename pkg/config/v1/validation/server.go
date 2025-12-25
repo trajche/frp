@@ -17,10 +17,12 @@ package validation
 import (
 	"fmt"
 	"slices"
+	"strings"
 
 	"github.com/samber/lo"
 
 	v1 "github.com/fatedier/frp/pkg/config/v1"
+	"github.com/fatedier/frp/pkg/policy/featuregate"
 	"github.com/fatedier/frp/pkg/policy/security"
 )
 
@@ -73,5 +75,47 @@ func (v *ConfigValidator) ValidateServerConfig(c *v1.ServerConfig) (Warning, err
 			errs = AppendError(errs, fmt.Errorf("invalid http plugin ops, optional values are %v", SupportedHTTPPluginOps))
 		}
 	}
+
+	if err := validateACMEConfig(&c.ACME); err != nil {
+		errs = AppendError(errs, err)
+	}
+
 	return warnings, errs
+}
+
+func validateACMEConfig(c *v1.ACMEConfig) error {
+	if !c.Enable {
+		return nil
+	}
+
+	var errs error
+
+	// Check feature gate is enabled
+	if !featuregate.Enabled(featuregate.ACME) {
+		errs = AppendError(errs, fmt.Errorf("acme is enabled but ACME feature gate is not enabled; set featureGates.ACME=true"))
+	}
+
+	// Email is required
+	if c.Email == "" {
+		errs = AppendError(errs, fmt.Errorf("acme.email is required when ACME is enabled"))
+	}
+
+	// AcceptTOS is required
+	if !c.AcceptTOS {
+		errs = AppendError(errs, fmt.Errorf("acme.acceptTOS must be true to use Let's Encrypt"))
+	}
+
+	// If dashboard ACME is enabled, domains are required
+	if lo.FromPtr(c.EnableForDashboard) && len(c.DashboardDomains) == 0 {
+		errs = AppendError(errs, fmt.Errorf("acme.dashboardDomains is required when acme.enableForDashboard is true"))
+	}
+
+	// Validate no wildcard domains (HTTP-01 doesn't support wildcards)
+	for _, d := range c.DashboardDomains {
+		if strings.HasPrefix(d, "*") || strings.Contains(d, "*") {
+			errs = AppendError(errs, fmt.Errorf("wildcard domain %q is not supported with HTTP-01 challenge; use DNS-01 for wildcards", d))
+		}
+	}
+
+	return errs
 }

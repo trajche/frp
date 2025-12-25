@@ -96,6 +96,10 @@ type ServerConfig struct {
 	AllowPorts []types.PortsRange `json:"allowPorts,omitempty"`
 
 	HTTPPlugins []HTTPPluginOptions `json:"httpPlugins,omitempty"`
+
+	// ACME configures automatic TLS certificate provisioning via Let's Encrypt.
+	// Requires the ACME feature gate to be enabled: featureGates = { ACME = true }
+	ACME ACMEConfig `json:"acme,omitempty"`
 }
 
 func (c *ServerConfig) Complete() error {
@@ -106,6 +110,7 @@ func (c *ServerConfig) Complete() error {
 	c.Transport.Complete()
 	c.WebServer.Complete()
 	c.SSHTunnelGateway.Complete()
+	c.ACME.Complete()
 
 	c.BindAddr = util.EmptyOr(c.BindAddr, "0.0.0.0")
 	c.BindPort = util.EmptyOr(c.BindPort, 7000)
@@ -212,4 +217,40 @@ type SSHTunnelGateway struct {
 
 func (c *SSHTunnelGateway) Complete() {
 	c.AutoGenPrivateKeyPath = util.EmptyOr(c.AutoGenPrivateKeyPath, "./.autogen_ssh_key")
+}
+
+// ACMEConfig defines ACME/Let's Encrypt configuration for automatic TLS certificates.
+// This feature requires the ACME feature gate to be enabled.
+type ACMEConfig struct {
+	// Enable enables ACME certificate automation.
+	Enable bool `json:"enable,omitempty"`
+	// Email is required for Let's Encrypt registration and certificate expiry notifications.
+	Email string `json:"email,omitempty"`
+	// AcceptTOS indicates acceptance of the CA's Terms of Service.
+	// Must be true to use Let's Encrypt.
+	AcceptTOS bool `json:"acceptTOS,omitempty"`
+	// CAEndpoint allows using a custom ACME CA endpoint.
+	// Default: Let's Encrypt production (https://acme-v02.api.letsencrypt.org/directory)
+	// Staging: https://acme-staging-v02.api.letsencrypt.org/directory
+	CAEndpoint string `json:"caEndpoint,omitempty"`
+	// StoragePath is the directory where certificates and account data are stored.
+	// Default: ~/.frp/acme
+	StoragePath string `json:"storagePath,omitempty"`
+	// EnableForVhost enables automatic certificate provisioning for vhost HTTPS proxies.
+	// Certificates are obtained on-demand when clients register proxies with customDomains or subDomain.
+	// Default: true when ACME is enabled.
+	EnableForVhost *bool `json:"enableForVhost,omitempty"`
+	// EnableForDashboard enables ACME certificates for the dashboard/webServer.
+	// Requires DashboardDomains to be set.
+	EnableForDashboard *bool `json:"enableForDashboard,omitempty"`
+	// DashboardDomains lists the domain(s) for the dashboard ACME certificate.
+	// Required if EnableForDashboard is true.
+	DashboardDomains []string `json:"dashboardDomains,omitempty"`
+}
+
+func (c *ACMEConfig) Complete() {
+	if c.Enable {
+		c.EnableForVhost = util.EmptyOr(c.EnableForVhost, lo.ToPtr(true))
+		c.EnableForDashboard = util.EmptyOr(c.EnableForDashboard, lo.ToPtr(false))
+	}
 }

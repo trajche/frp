@@ -1,0 +1,33 @@
+# frps configuration with ACME support
+bindAddr = "0.0.0.0"
+bindPort = 7000
+
+# HTTP/HTTPS vhost ports (port 80 required for ACME HTTP-01 challenge)
+vhostHTTPPort = 80
+vhostHTTPSPort = 443
+
+# Dashboard
+webServer.addr = "0.0.0.0"
+webServer.port = 7500
+webServer.user = "admin"
+webServer.password = "admin"
+
+# Logging
+log.to = "console"
+log.level = "info"
+
+# Enable ACME feature gate (alpha)
+featureGates = { ACME = true }
+
+# ACME / Let's Encrypt configuration
+acme.enable = true
+acme.email = "your-email@example.com"
+acme.acceptTOS = true
+acme.storagePath = "/var/lib/frps/acme"
+
+# Auto-provision certs for HTTPS proxies
+acme.enableForVhost = true
+
+# Optionally enable ACME for dashboard
+# acme.enableForDashboard = true
+# acme.dashboardDomains = ["dashboard.example.com"]

@@ -1,0 +1,10 @@
+.git
+.github
+.gitignore
+*.md
+!README.md
+docker/
+test/
+Release/
+hack/
+Makefile.cross-compiles

@@ -34,6 +34,12 @@ var (
 	defaultWriteTimeout = 60 * time.Second
 )
 
+// TLSProvider is an interface for dynamic TLS configuration.
+// This is used to support ACME certificate management.
+type TLSProvider interface {
+	GetTLSConfig() *tls.Config
+}
+
 type Server struct {
 	addr   string
 	ln     net.Listener
@@ -101,6 +107,12 @@ func (s *Server) Run() error {
 
 func (s *Server) Close() error {
 	return s.hs.Close()
+}
+
+// SetTLSConfigFromProvider sets the TLS configuration from a provider (e.g., ACME manager).
+// This should be called before Run() if ACME is enabled for the dashboard.
+func (s *Server) SetTLSConfigFromProvider(provider TLSProvider) {
+	s.tlsCfg = provider.GetTLSConfig()
 }
 
 type RouterRegisterHelper struct {

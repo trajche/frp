@@ -50,12 +50,14 @@ type FeatureSpec struct {
 // Define all available features here
 var (
 	VirtualNet = Feature("VirtualNet")
+	ACME       = Feature("ACME")
 )
 
 // defaultFeatures defines default features with their specifications
 var defaultFeatures = map[Feature]FeatureSpec{
 	// Actual features
 	VirtualNet: {Default: false, Stage: Alpha},
+	ACME:       {Default: false, Stage: Alpha},
 }
 
 // FeatureGate indicates whether a given feature is enabled or not

@@ -4,6 +4,7 @@ go 1.24.0
 
 require (
 	github.com/armon/go-socks5 v0.0.0-20160902184237-e75332964ef5
+	github.com/caddyserver/certmagic v0.25.0
 	github.com/coreos/go-oidc/v3 v3.14.1
 	github.com/fatedier/golib v0.5.1
 	github.com/google/uuid v1.6.0
@@ -40,6 +41,7 @@ require (
 require (
 	github.com/Azure/go-ntlmssp v0.0.0-20221128193559-754e69321358 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
+	github.com/caddyserver/zerossl v0.1.3 // indirect
 	github.com/cespare/xxhash/v2 v2.2.0 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/go-jose/go-jose/v4 v4.0.5 // indirect
@@ -49,8 +51,11 @@ require (
 	github.com/google/go-cmp v0.7.0 // indirect
 	github.com/google/pprof v0.0.0-20250403155104-27863c87afa6 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
-	github.com/klauspost/cpuid/v2 v2.2.6 // indirect
+	github.com/klauspost/cpuid/v2 v2.3.0 // indirect
 	github.com/klauspost/reedsolomon v1.12.0 // indirect
+	github.com/libdns/libdns v1.1.1 // indirect
+	github.com/mholt/acmez/v3 v3.1.3 // indirect
+	github.com/miekg/dns v1.1.68 // indirect
 	github.com/pion/dtls/v2 v2.2.7 // indirect
 	github.com/pion/logging v0.2.2 // indirect
 	github.com/pion/transport/v2 v2.2.1 // indirect
@@ -66,7 +71,11 @@ require (
 	github.com/tidwall/pretty v1.2.0 // indirect
 	github.com/tjfoc/gmsm v1.4.1 // indirect
 	github.com/vishvananda/netns v0.0.4 // indirect
+	github.com/zeebo/blake3 v0.2.4 // indirect
 	go.uber.org/automaxprocs v1.6.0 // indirect
+	go.uber.org/multierr v1.11.0 // indirect
+	go.uber.org/zap v1.27.0 // indirect
+	go.uber.org/zap/exp v0.3.0 // indirect
 	golang.org/x/mod v0.27.0 // indirect
 	golang.org/x/sys v0.35.0 // indirect
 	golang.org/x/text v0.28.0 // indirect

@@ -156,6 +156,27 @@ natholeAnalysisDataReserveHours = 168
 # sshTunnelGateway.autoGenPrivateKeyPath = ""
 # sshTunnelGateway.authorizedKeysFile = "/home/frp-user/.ssh/authorized_keys"
 
+# ACME / Let's Encrypt automatic TLS certificates (ALPHA feature)
+# Requires the ACME feature gate to be enabled:
+# featureGates = { ACME = true }
+#
+# IMPORTANT: HTTP-01 challenge requires port 80 to be accessible.
+# Wildcard certificates (*.example.com) are NOT supported with HTTP-01.
+# Use vhostHTTPPort = 80 for the challenge handler.
+#
+# acme.enable = true
+# acme.email = "admin@example.com"
+# acme.acceptTOS = true
+# acme.storagePath = "/var/lib/frps/acme"
+# For testing, use Let's Encrypt staging:
+# acme.caEndpoint = "https://acme-staging-v02.api.letsencrypt.org/directory"
+# Enable ACME for vhost HTTPS proxies (default: true when ACME is enabled)
+# acme.enableForVhost = true
+# Enable ACME for the dashboard/webServer
+# acme.enableForDashboard = false
+# Domains for dashboard ACME certificate (required if enableForDashboard is true)
+# acme.dashboardDomains = ["dashboard.example.com"]
+
 [[httpPlugins]]
 name = "user-manager"
 addr = "127.0.0.1:9000"

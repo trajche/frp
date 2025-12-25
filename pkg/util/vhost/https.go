@@ -23,17 +23,53 @@ import (
 	libnet "github.com/fatedier/golib/net"
 )
 
-type HTTPSMuxer struct {
-	*Muxer
+// ACMEProvider is an interface for ACME certificate management.
+// This is used to decouple the vhost package from the acme package.
+type ACMEProvider interface {
+	GetCertificate() func(*tls.ClientHelloInfo) (*tls.Certificate, error)
 }
 
-func NewHTTPSMuxer(listener net.Listener, timeout time.Duration) (*HTTPSMuxer, error) {
+// HTTPSMuxerOption is a function that configures an HTTPSMuxer.
+type HTTPSMuxerOption func(*HTTPSMuxer)
+
+// WithACMEProvider sets the ACME provider for dynamic certificate management.
+func WithACMEProvider(provider ACMEProvider) HTTPSMuxerOption {
+	return func(m *HTTPSMuxer) {
+		m.acmeProvider = provider
+	}
+}
+
+type HTTPSMuxer struct {
+	*Muxer
+	acmeProvider ACMEProvider
+}
+
+func NewHTTPSMuxer(listener net.Listener, timeout time.Duration, opts ...HTTPSMuxerOption) (*HTTPSMuxer, error) {
 	mux, err := NewMuxer(listener, GetHTTPSHostname, timeout)
-	mux.SetFailHookFunc(vhostFailed)
 	if err != nil {
 		return nil, err
 	}
-	return &HTTPSMuxer{mux}, err
+
+	httpsMuxer := &HTTPSMuxer{Muxer: mux}
+	for _, opt := range opts {
+		opt(httpsMuxer)
+	}
+
+	// Set fail hook with ACME-aware TLS config
+	mux.SetFailHookFunc(httpsMuxer.vhostFailedWithACME)
+
+	return httpsMuxer, nil
+}
+
+// vhostFailedWithACME handles failed vhost connections with optional ACME certificate lookup.
+func (m *HTTPSMuxer) vhostFailedWithACME(c net.Conn) {
+	tlsCfg := &tls.Config{}
+	if m.acmeProvider != nil {
+		tlsCfg.GetCertificate = m.acmeProvider.GetCertificate()
+	}
+	// Try to complete handshake (will fail but provides proper TLS alert)
+	_ = tls.Server(c, tlsCfg).Handshake()
+	c.Close()
 }
 
 func GetHTTPSHostname(c net.Conn) (_ net.Conn, _ map[string]string, err error) {
@@ -68,12 +104,6 @@ func readClientHello(reader io.Reader) (*tls.ClientHelloInfo, error) {
 		return nil, err
 	}
 	return hello, nil
-}
-
-func vhostFailed(c net.Conn) {
-	// Alert with alertUnrecognizedName
-	_ = tls.Server(c, &tls.Config{}).Handshake()
-	c.Close()
 }
 
 type readOnlyConn struct {

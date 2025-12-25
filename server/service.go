@@ -31,12 +31,14 @@ import (
 	quic "github.com/quic-go/quic-go"
 	"github.com/samber/lo"
 
+	"github.com/fatedier/frp/pkg/acme"
 	"github.com/fatedier/frp/pkg/auth"
 	v1 "github.com/fatedier/frp/pkg/config/v1"
 	modelmetrics "github.com/fatedier/frp/pkg/metrics"
 	"github.com/fatedier/frp/pkg/msg"
 	"github.com/fatedier/frp/pkg/nathole"
 	plugin "github.com/fatedier/frp/pkg/plugin/server"
+	"github.com/fatedier/frp/pkg/policy/featuregate"
 	"github.com/fatedier/frp/pkg/ssh"
 	"github.com/fatedier/frp/pkg/transport"
 	httppkg "github.com/fatedier/frp/pkg/util/http"
@@ -120,6 +122,9 @@ type Service struct {
 
 	cfg *v1.ServerConfig
 
+	// ACME certificate manager (optional, nil if ACME is disabled)
+	acmeManager *acme.Manager
+
 	// service context
 	ctx context.Context
 	// call cancel to stop service
@@ -154,6 +159,17 @@ func NewService(cfg *v1.ServerConfig) (*Service, error) {
 		return nil, err
 	}
 
+	// Initialize ACME manager if enabled
+	var acmeManager *acme.Manager
+	if featuregate.Enabled(featuregate.ACME) && cfg.ACME.Enable {
+		acmeCfg := acme.ConfigFromServerConfig(&cfg.ACME)
+		acmeManager, err = acme.NewManager(acmeCfg)
+		if err != nil {
+			return nil, fmt.Errorf("failed to initialize ACME manager: %v", err)
+		}
+		log.Infof("ACME certificate manager initialized, email: %s", acmeCfg.Email)
+	}
+
 	svr := &Service{
 		ctlManager:    NewControlManager(),
 		pxyManager:    proxy.NewManager(),
@@ -162,6 +178,7 @@ func NewService(cfg *v1.ServerConfig) (*Service, error) {
 			VisitorManager: visitor.NewManager(),
 			TCPPortManager: ports.NewManager("tcp", cfg.ProxyBindAddr, cfg.AllowPorts),
 			UDPPortManager: ports.NewManager("udp", cfg.ProxyBindAddr, cfg.AllowPorts),
+			ACMEManager:    acmeManager,
 		},
 		sshTunnelListener: netpkg.NewInternalListener(),
 		httpVhostRouter:   vhost.NewRouters(),
@@ -169,9 +186,15 @@ func NewService(cfg *v1.ServerConfig) (*Service, error) {
 		webServer:         webServer,
 		tlsConfig:         tlsConfig,
 		cfg:               cfg,
+		acmeManager:       acmeManager,
 		ctx:               context.Background(),
 	}
 	if webServer != nil {
+		// Set ACME TLS for dashboard if enabled
+		if acmeManager != nil && acmeManager.Config().EnableForDashboard {
+			webServer.SetTLSConfigFromProvider(acmeManager)
+			log.Infof("ACME certificates enabled for dashboard")
+		}
 		webServer.RouteRegister(svr.registerRouteHandlers)
 	}
 
@@ -288,10 +311,17 @@ func NewService(cfg *v1.ServerConfig) (*Service, error) {
 		}, svr.httpVhostRouter)
 		svr.rc.HTTPReverseProxy = rp
 
+		// Wrap HTTP handler with ACME challenge handler if enabled
+		var handler http.Handler = rp
+		if acmeManager != nil && acmeManager.Config().EnableForVhost {
+			handler = acmeManager.HTTPChallengeHandler(rp)
+			log.Infof("ACME HTTP-01 challenge handler enabled on HTTP vhost")
+		}
+
 		address := net.JoinHostPort(cfg.ProxyBindAddr, strconv.Itoa(cfg.VhostHTTPPort))
 		server := &http.Server{
 			Addr:              address,
-			Handler:           rp,
+			Handler:           handler,
 			ReadHeaderTimeout: 60 * time.Second,
 		}
 		var l net.Listener
@@ -323,7 +353,13 @@ func NewService(cfg *v1.ServerConfig) (*Service, error) {
 			log.Infof("https service listen on %s", address)
 		}
 
-		svr.rc.VhostHTTPSMuxer, err = vhost.NewHTTPSMuxer(l, vhostReadWriteTimeout)
+		// Create HTTPS muxer with optional ACME support
+		var httpsOpts []vhost.HTTPSMuxerOption
+		if acmeManager != nil && acmeManager.Config().EnableForVhost {
+			httpsOpts = append(httpsOpts, vhost.WithACMEProvider(acmeManager))
+			log.Infof("ACME certificate provider enabled for HTTPS vhost")
+		}
+		svr.rc.VhostHTTPSMuxer, err = vhost.NewHTTPSMuxer(l, vhostReadWriteTimeout, httpsOpts...)
 		if err != nil {
 			return nil, fmt.Errorf("create vhost httpsMuxer error, %v", err)
 		}
@@ -381,6 +417,15 @@ func (svr *Service) Run(ctx context.Context) {
 		go svr.sshTunnelGateway.Run()
 	}
 
+	// Start ACME manager if enabled
+	if svr.acmeManager != nil {
+		go func() {
+			if err := svr.acmeManager.Start(svr.ctx); err != nil {
+				log.Warnf("ACME manager exit with error: %v", err)
+			}
+		}()
+	}
+
 	svr.HandleListener(svr.listener, false)
 
 	<-svr.ctx.Done()
@@ -414,6 +459,9 @@ func (svr *Service) Close() error {
 	}
 	if svr.sshTunnelGateway != nil {
 		svr.sshTunnelGateway.Close()
+	}
+	if svr.acmeManager != nil {
+		svr.acmeManager.Stop()
 	}
 	svr.rc.Close()
 	svr.muxer.Close()

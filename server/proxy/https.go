@@ -31,6 +31,9 @@ func init() {
 type HTTPSProxy struct {
 	*BaseProxy
 	cfg *v1.HTTPSProxyConfig
+
+	// registeredDomains tracks domains registered with ACME for cleanup on Close
+	registeredDomains []string
 }
 
 func NewHTTPSProxy(baseProxy *BaseProxy) Proxy {
@@ -59,6 +62,12 @@ func (pxy *HTTPSProxy) Run() (remoteAddr string, err error) {
 			continue
 		}
 
+		// Register domain with ACME manager if enabled
+		if pxy.rc.ACMEManager != nil {
+			pxy.rc.ACMEManager.RegisterDomain(domain)
+			pxy.registeredDomains = append(pxy.registeredDomains, domain)
+		}
+
 		l, err := pxy.listenForDomain(routeConfig, domain)
 		if err != nil {
 			return "", err
@@ -70,6 +79,13 @@ func (pxy *HTTPSProxy) Run() (remoteAddr string, err error) {
 
 	if pxy.cfg.SubDomain != "" {
 		domain := pxy.cfg.SubDomain + "." + pxy.serverCfg.SubDomainHost
+
+		// Register domain with ACME manager if enabled
+		if pxy.rc.ACMEManager != nil {
+			pxy.rc.ACMEManager.RegisterDomain(domain)
+			pxy.registeredDomains = append(pxy.registeredDomains, domain)
+		}
+
 		l, err := pxy.listenForDomain(routeConfig, domain)
 		if err != nil {
 			return "", err
@@ -85,6 +101,12 @@ func (pxy *HTTPSProxy) Run() (remoteAddr string, err error) {
 }
 
 func (pxy *HTTPSProxy) Close() {
+	// Unregister domains from ACME manager
+	if pxy.rc.ACMEManager != nil {
+		for _, domain := range pxy.registeredDomains {
+			pxy.rc.ACMEManager.UnregisterDomain(domain)
+		}
+	}
 	pxy.BaseProxy.Close()
 }
 
