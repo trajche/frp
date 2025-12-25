@@ -1,8 +1,5 @@
-# Build stage
-FROM --platform=$BUILDPLATFORM golang:1.24-bookworm AS builder
-
-ARG TARGETOS=linux
-ARG TARGETARCH=amd64
+# Build stage - build on target platform directly
+FROM golang:1.24-bookworm AS builder
 
 WORKDIR /src
 
@@ -15,9 +12,8 @@ RUN go mod download
 # Copy source code
 COPY . .
 
-# Build frps binary
-RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
-    go build -trimpath -ldflags "-s -w" -o /frps ./cmd/frps
+# Build frps binary for current platform
+RUN CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o /frps ./cmd/frps
 
 # Runtime stage
 FROM debian:bookworm-slim
